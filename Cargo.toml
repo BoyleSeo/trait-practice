@@ -6,3 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+
+[features]
+default = ["js_map"]
+# default = ["terminal_api"]
+js_map = []
+terminal_api = ["debug", "custom_error"]
+debug = []
+custom_error = []
