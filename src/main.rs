@@ -6,7 +6,7 @@ mod feature;
 #[path = "other.rs"]
 mod feature;
 #[cfg(feature = "terminal_api")]
-#[path = "terminal.rs"]
+#[path = "terminal/mod.rs"]
 mod feature;
 
 use feature::*;
