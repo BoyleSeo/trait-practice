@@ -236,11 +236,9 @@ trait ShelfLife {
 }
 impl ShelfLife for Option<DateTime<Utc>> {
     fn expired_at(&self) -> Option<&DateTime<Utc>> {
-        let d = self.as_ref()?;
-        if d < &Utc::now() {
-            Some(d)
-        } else {
-            None
+        match self {
+            Some(d) if d < &Utc::now() => Some(d), //as_ref() coersion?
+            _ => None,
         }
     }
 }
