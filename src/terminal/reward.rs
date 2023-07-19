@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-
+#[derive(Debug, Clone)]
 pub(crate) enum RewardGroup {
     ASSET,
     AVATAR,
@@ -8,6 +8,7 @@ pub(crate) enum RewardGroup {
     QUEST,
 }
 
+#[derive(Clone)]
 pub struct RewardDto {
     pub(crate) group: RewardGroup, // makes item visible within the current crate
     pub _type: String,

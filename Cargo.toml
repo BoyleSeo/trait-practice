@@ -9,8 +9,8 @@ edition = "2021"
 chrono = "0.4.26"
 
 [features]
-default = ["js_map"]
-# default = ["terminal_api"]
+# default = ["js_map"]
+default = ["terminal_api"]
 js_map = []
 terminal_api = ["debug", "custom_error"]
 debug = []
