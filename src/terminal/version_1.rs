@@ -45,30 +45,45 @@ impl PlayioReward<Item> for Item {
         self.is_hidden
     }
 }
-
-struct RewardFactory;
-impl RewardFactory {
-    fn new(dto: RewardDto) -> Box<dyn RewardDisplay + Send> {
-        //panic 시 메인스레드가 종료되지 않도록
-        let result = thread::spawn(move || match dto.group {
-            RewardGroup::ASSET => Box::new(Gem::from(dto)),
-            RewardGroup::ITEM => {
-                //From & Into trait 은 서로를 자동구현시킴
-                let item: Item = dto.into();
-                Box::new(item) as Box<dyn RewardDisplay + Send>
+type RewardObj = Box<dyn RewardDisplay + Send>;
+trait RewardFactory {
+    fn try_gen(dto: RewardDto) -> thread::Result<RewardObj> {
+        //not recommended. panic catch하는 용법 자체를 피하는게 좋다고 합니다.
+        std::panic::catch_unwind(|| {
+            match dto.group {
+                RewardGroup::ASSET => Box::new(Gem::from(dto)),
+                RewardGroup::ITEM => {
+                    //From & Into trait 은 서로를 자동구현시킴
+                    let item: Item = dto.into();
+                    Box::new(item) as RewardObj
+                }
+                _ => Box::new(Unknown),
             }
-            _ => Box::new(Unknown),
         })
-        .join();
-        if let Ok(ok) = result {
-            ok
-        } else {
-            // analytic service 에 오류 보고
-            Box::new(Unknown)
-        }
+    }
+    fn gen(dto: RewardDto) -> RewardObj;
+}
+//stateless 서비스 다형성 예시
+struct RewardFactoryUnsafe;
+impl RewardFactory for RewardFactoryUnsafe {
+    fn gen(dto: RewardDto) -> RewardObj {
+        Self::try_gen(dto).unwrap()
     }
 }
-
+struct RewardFactorySafe;
+impl RewardFactory for RewardFactorySafe {
+    fn gen(dto: RewardDto) -> RewardObj {
+        Self::try_gen(dto).unwrap_or_else(|err| {
+            if let Ok(err_str) = err.downcast::<&str>() {
+                println!("ERROR REPORT: {:?} (RewardFactory::new)", err_str);
+            }
+            Box::new(Unknown)
+        })
+    }
+}
+fn gen_reward<T: RewardFactory>(dto: RewardDto) -> RewardObj {
+    T::gen(dto)
+}
 impl From<RewardDto> for Gem {
     fn from(value: RewardDto) -> Self {
         Gem {
@@ -155,7 +170,7 @@ impl RewardDisplay for Gem {
 
 struct RewardCastError;
 impl Item {
-    fn try_downcast_from(reward: Box<dyn RewardDisplay>) -> Result<Self, RewardCastError> {
+    fn try_downcast_from(reward: RewardObj) -> Result<Self, RewardCastError> {
         if let RewardCast::Item(item) = reward.downcast() {
             Ok(item)
         } else {
@@ -167,7 +182,7 @@ impl Gem {
     fn shine(&self) {
         println!("bling bling");
     }
-    fn try_downcast_from(reward: Box<dyn RewardDisplay>) -> Result<Self, RewardCastError> {
+    fn try_downcast_from(reward: RewardObj) -> Result<Self, RewardCastError> {
         if let RewardCast::Gem(gem) = reward.downcast() {
             Ok(gem)
         } else {
@@ -176,6 +191,12 @@ impl Gem {
     }
 }
 pub fn test() {
+    assert_eq!(
+        DateTime::<Utc>::default(), //1970.1.1
+        Utc::now()
+            .checked_sub_days(chrono::Days::new(18446744073709551615))
+            .unwrap_or_default()
+    );
     let dto = RewardDto {
         group: RewardGroup::ASSET,
         delta: 3000,
@@ -201,11 +222,14 @@ pub fn test() {
         min: None,
         max: None,
         is_hidden: false,
-        shelf_life: Some(Utc::now()),
+        shelf_life: Utc::now()
+            .checked_sub_days(chrono::Days::new(1))
+            // .checked_sub_signed(chrono::Duration::days(1)) //dst로인한 버그가능
+            .or(Some(DateTime::default())),
     };
     let dto_invalid = dto2.clone();
-
-    let reward: Box<dyn RewardDisplay> = RewardFactory::new(dto);
+    let gen_reward = gen_reward::<RewardFactoryUnsafe>;
+    let reward = gen_reward(dto);
     println!("reward1: {}", reward.fmt_string());
     println!("reward1: {}", reward.image());
     println!("reward1: {}", reward.unit_image());
@@ -216,7 +240,7 @@ pub fn test() {
     }
 
     print!("\n");
-    let reward2 = RewardFactory::new(dto2);
+    let reward2 = gen_reward(dto2);
     println!("reward2: {}", reward2.fmt_string());
     if let Ok(Item {
         name, shelf_life, ..
@@ -236,10 +260,7 @@ trait ShelfLife {
 }
 impl ShelfLife for Option<DateTime<Utc>> {
     fn expired_at(&self) -> Option<&DateTime<Utc>> {
-        match self {
-            Some(d) if d < &Utc::now() => Some(d), //as_ref() coersion?
-            _ => None,
-        }
+        self.as_ref().filter(|&d| d < &Utc::now())
     }
 }
 impl ShelfLife for Item {
@@ -255,7 +276,6 @@ impl DateTimeExt for DateTime<Utc> {
         self.format("%Y-%m-%d %H:%M:%S").to_string()
     }
 }
-// type RewardObj = Box<dyn RewardDisplay + Send>;
 fn factory_glitched(dto: RewardDto) {
     let dto = RewardDto {
         _type: String::from("*@#&^$*@&#^$"),
@@ -267,7 +287,7 @@ fn factory_glitched(dto: RewardDto) {
         shelf_life: None,
         ..dto
     };
-    let reward_err = RewardFactory::new(dto.clone());
+    let reward_err = gen_reward::<RewardFactorySafe>(dto.clone());
     let cb: Box<dyn FnOnce() -> Result<(), RewardCastError>> = match dto.group {
         RewardGroup::ASSET => Box::new(move || {
             let gem = Gem::try_downcast_from(reward_err)?;
