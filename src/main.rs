@@ -2,11 +2,11 @@
 #[path = "js_map/mod.rs"]
 mod feature;
 
-#[cfg(not(any(feature = "js_map", feature = "terminal_api")))]
+#[cfg(not(any(feature = "js_map", feature = "object")))]
 #[path = "other.rs"]
 mod feature;
-#[cfg(feature = "terminal_api")]
-#[path = "terminal/mod.rs"]
+#[cfg(feature = "object")]
+#[path = "object/mod.rs"]
 mod feature;
 
 use feature::*;
