@@ -1,30 +1,32 @@
+use crate::feature::reward::{RewardDto, RewardGroup};
+use chrono::{DateTime, Utc};
 use std::thread;
 
-use chrono::{DateTime, Utc};
-
-use crate::feature::reward::{RewardDto, RewardGroup};
-
-enum RewardCast {
+enum RewardCast<'a> {
     Unknown,
-    Gem(Gem),
-    Item(Item),
+    Gem(&'a Gem),
+    Item(&'a Item),
 }
-trait RewardDisplay {
-    fn is_hidden(&self) -> bool;
-    fn unit_image(&self) -> &str;
-    fn image(&self) -> &str;
-    fn fmt_string(&self) -> String;
-    fn downcast(self: Box<Self>) -> RewardCast {
+#[derive(Debug)]
+struct RewardDisplay {
+    unit_image: Box<str>,
+    image: Box<str>,
+    fmt_string: Box<str>,
+}
+
+trait Reward {
+    fn downcast(&self) -> RewardCast {
         RewardCast::Unknown
+    }
+    fn try_display(&self) -> Option<RewardDisplay> {
+        None
     }
 }
 
 trait PlayioReward<T> {
     fn is_hidden(&self) -> bool;
 }
-
 struct Unknown;
-
 struct Gem {
     delta: u32,
     min: Option<u32>,
@@ -45,7 +47,7 @@ impl PlayioReward<Item> for Item {
         self.is_hidden
     }
 }
-type RewardObj = Box<dyn RewardDisplay + Send>;
+type RewardObj = Box<dyn Reward + Send>;
 trait RewardFactory {
     fn try_gen(dto: RewardDto) -> thread::Result<RewardObj> {
         //not recommended. panic catch하는 용법 자체를 피하는게 좋다고 합니다.
@@ -107,70 +109,53 @@ impl From<RewardDto> for Item {
     }
 }
 
-impl RewardDisplay for Unknown {
-    fn is_hidden(&self) -> bool {
-        false
+impl Reward for Unknown {}
+impl Reward for Item {
+    fn downcast(&self) -> RewardCast {
+        RewardCast::Item(self)
     }
-
-    fn unit_image(&self) -> &str {
-        ""
+    fn try_display(&self) -> Option<RewardDisplay> {
+        Some(self.display())
     }
-
-    fn image(&self) -> &str {
-        ""
+}
+impl Reward for Gem {
+    fn downcast(&self) -> RewardCast {
+        RewardCast::Gem(self)
     }
-
-    fn fmt_string(&self) -> String {
-        "".to_owned()
+    fn try_display(&self) -> Option<RewardDisplay> {
+        if self.is_hidden {
+            None
+        } else {
+            Some(self.display())
+        }
+    }
+}
+trait DisplayableReward: Reward {
+    fn display(&self) -> RewardDisplay;
+}
+impl DisplayableReward for Item {
+    fn display(&self) -> RewardDisplay {
+        RewardDisplay {
+            unit_image: Box::from(""),
+            image: Box::from(""),
+            fmt_string: Box::from(format!("Item({})", self.name)),
+        }
     }
 }
 
-impl RewardDisplay for Item {
-    fn is_hidden(&self) -> bool {
-        self.is_hidden
-    }
-
-    fn unit_image(&self) -> &str {
-        &self.url
-    }
-
-    fn image(&self) -> &str {
-        &self.url
-    }
-
-    fn fmt_string(&self) -> String {
-        format!("{} Item", self.name)
-    }
-
-    fn downcast(self: Box<Self>) -> RewardCast {
-        RewardCast::Item(*self)
-    }
-}
-
-impl RewardDisplay for Gem {
-    fn is_hidden(&self) -> bool {
-        self.is_hidden
-    }
-
-    fn unit_image(&self) -> &str {
-        "Gem Image"
-    }
-
-    fn image(&self) -> &str {
-        "Gem Image"
-    }
-
-    fn fmt_string(&self) -> String {
-        format!("{} Gems", self.delta)
-    }
-    fn downcast(self: Box<Self>) -> RewardCast {
-        RewardCast::Gem(*self)
+impl DisplayableReward for Gem {
+    fn display(&self) -> RewardDisplay {
+        RewardDisplay {
+            unit_image: Box::from("Gem Image"),
+            image: Box::from("Gem Image"),
+            fmt_string: Box::from(format!("{} Gems", self.delta)),
+        }
     }
 }
 
 struct RewardCastError;
 impl Item {
-    fn try_downcast_from(reward: RewardObj) -> Result<Self, RewardCastError> {
+    fn try_downcast_from(reward: &RewardObj) -> Result<&Self, RewardCastError> {
         if let RewardCast::Item(item) = reward.downcast() {
             Ok(item)
         } else {
@@ -182,7 +167,7 @@ impl Gem {
     fn shine(&self) {
         println!("bling bling");
     }
-    fn try_downcast_from(reward: RewardObj) -> Result<Self, RewardCastError> {
+    fn try_downcast_from(reward: &RewardObj) -> Result<&Self, RewardCastError> {
         if let RewardCast::Gem(gem) = reward.downcast() {
             Ok(gem)
         } else {
@@ -209,7 +194,6 @@ pub fn test() {
         is_hidden: false,
         shelf_life: None,
     };
-
     let dto2 = RewardDto {
         group: RewardGroup::ITEM,
         delta: 1,
@@ -229,22 +213,23 @@ pub fn test() {
     };
     let dto_invalid = dto2.clone();
     let gen_reward = gen_reward::<RewardFactoryUnsafe>;
-    let reward = gen_reward(dto);
-    println!("reward1: {}", reward.fmt_string());
-    println!("reward1: {}", reward.image());
-    println!("reward1: {}", reward.unit_image());
-    //ownership 이동
-    if let Ok(gem) = Gem::try_downcast_from(reward) {
+    let reward1 = gen_reward(dto);
+    if let Some(display) = reward1.try_display() {
+        println!("reward1: {:?}", display);
+    }
+    if let Ok(gem) = Gem::try_downcast_from(&reward1) {
         print!("it shines!: ");
         gem.shine();
     }
 
     print!("\n");
     let reward2 = gen_reward(dto2);
-    println!("reward2: {}", reward2.fmt_string());
+    if let Some(display) = reward2.try_display() {
+        println!("reward2: {:?}", display);
+    }
     if let Ok(Item {
         name, shelf_life, ..
-    }) = Item::try_downcast_from(reward2)
+    }) = Item::try_downcast_from(&reward2)
     {
         print!("Item {name}");
         if let Some(expr) = shelf_life.expired_at() {
@@ -290,13 +275,13 @@ fn factory_glitched(dto: RewardDto) {
     let reward_err = gen_reward::<RewardFactorySafe>(dto.clone());
     let cb: Box<dyn FnOnce() -> Result<(), RewardCastError>> = match dto.group {
         RewardGroup::ASSET => Box::new(move || {
-            let gem = Gem::try_downcast_from(reward_err)?;
+            let gem = Gem::try_downcast_from(&reward_err)?;
             print!("it shines!: ");
             gem.shine();
             Ok(())
         }),
         RewardGroup::ITEM => Box::new(move || {
-            let Item { name, .. } = Item::try_downcast_from(reward_err)?;
+            let Item { name, .. } = Item::try_downcast_from(&reward_err)?;
             println!("Item name: {name}");
             Ok(())
         }),
