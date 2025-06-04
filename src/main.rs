@@ -37,3 +37,27 @@ impl TryFrom<&str> for Enum {
         }
     }
 }
+
+trait Traitor {
+    type Foo;
+    type Bar;
+
+    fn is_valid(&self) -> bool;
+    fn foo_foo(&self, n1: &Self::Foo, n2: &Self::Foo) -> bool;
+    fn foo_bar(&self, n: &Self::Foo) -> Vec<Self::Bar>;
+}
+
+fn funk(traitor: impl Traitor) -> bool {
+    traitor.is_valid()
+}
+
+fn bunk<T: Traitor<Foo = u8>>(traitor: T) -> bool {
+    traitor.foo_bar(&234);
+    traitor.is_valid()
+}
+
+fn grunge<T: Traitor>(traitor: &T, f1: &T::Foo, f2: &T::Foo) -> u32 {
+    let is_foo = traitor.foo_foo(f1, f2);
+    let bar = traitor.foo_bar(f2);
+    0
+}

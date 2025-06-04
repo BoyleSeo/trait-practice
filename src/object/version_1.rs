@@ -165,7 +165,8 @@ impl Item {
 }
 impl Gem {
     fn shine(&self) {
-        println!("bling bling");
+        let power = self.delta;
+        println!("bling bling {power}");
     }
     fn try_downcast_from(reward: &RewardObj) -> Result<&Self, RewardCastError> {
         if let RewardCast::Gem(gem) = reward.downcast() {
